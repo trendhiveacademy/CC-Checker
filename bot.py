@@ -1,6 +1,14 @@
 import requests
 import braintree
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
+import logging
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+
+# Set up logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
 
 # Telegram Bot Token
 TELEGRAM_TOKEN = "7861412400:AAHwq_YK6UMHC2fDmZ_o-K8Fn7nKrU1VKZg"
@@ -13,6 +21,7 @@ braintree.Configuration.configure(
     private_key="5330cdbb761c06df49a6e0b2c6f8451b"
 )
 
+# BIN Lookup
 def bin_lookup(bin_number):
     try:
         res = requests.get(f"https://lookup.binlist.net/{bin_number}")
@@ -31,10 +40,12 @@ def bin_lookup(bin_number):
     except Exception as e:
         return {"error": str(e)}
 
+# Play Store Addability
 def is_playstore_addable(card_number):
     playstore_supported_bins = ["4", "5"]
     return "Yes ✅" if card_number.startswith(tuple(playstore_supported_bins)) else "No ❌"
 
+# Braintree Card Check
 def braintree_card_check(card_number, expiry, cvv):
     try:
         result = braintree.PaymentMethod.create({
@@ -45,11 +56,11 @@ def braintree_card_check(card_number, expiry, cvv):
     except Exception:
         return False
 
-def start(update, context):
+# Start Command
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_msg = (
         "👋 *Welcome to CC Checker by Trend Hive Academy!*\n\n"
         "⚠️ Note: U can check only 5 bins per hour or 5 cards per hour!\n\n"
-
         "📌 You can send:\n"
         "➤ Just BIN: `478200`\n"
         "➤ Full Card: `4782002070976487|09|28|995`\n"
@@ -63,17 +74,17 @@ def start(update, context):
         "🎬 YouTube: https://youtube.com/@trendhiveacademy\n\n"
         "⚠️ Note: Bot is for educational purposes only!"
     )
-    update.message.reply_text(welcome_msg, parse_mode='Markdown')
+    await update.message.reply_text(welcome_msg, parse_mode='Markdown')
 
-
-def process_card(update, context):
+# Process BIN or Card Input
+async def process_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message.text.strip()
 
     # If it's a BIN only (6 digits)
     if msg.isdigit() and len(msg) == 6:
         bin_data = bin_lookup(msg)
         if "error" in bin_data:
-            update.message.reply_text(f"BIN Error: {bin_data['error']}")
+            await update.message.reply_text(f"BIN Error: {bin_data['error']}")
             return
 
         reply = (
@@ -85,7 +96,7 @@ def process_card(update, context):
             f"🔖 *Brand:* {bin_data['brand']}\n"
             f"💠 *Scheme:* {bin_data['scheme']}"
         )
-        update.message.reply_text(reply, parse_mode='Markdown')
+        await update.message.reply_text(reply, parse_mode='Markdown')
         return
 
     # Else, assume it's a full card
@@ -96,16 +107,19 @@ def process_card(update, context):
                 card, month, year, cvv = parts
                 break
     else:
-        update.message.reply_text("❗ Invalid format.\nSend either:\n- `478200` (BIN only)\n- `4782002070976487|09|28|995` (Full Card)", parse_mode='Markdown')
+        await update.message.reply_text(
+            "❗ Invalid format.\nSend either:\n- `478200` (BIN only)\n- `4782002070976487|09|28|995` (Full Card)",
+            parse_mode='Markdown'
+        )
         return
 
     # BIN Lookup
     bin_data = bin_lookup(card[:6])
     if "error" in bin_data:
-        update.message.reply_text(f"BIN Error: {bin_data['error']}")
+        await update.message.reply_text(f"BIN Error: {bin_data['error']}")
         return
 
-    # Additional checks
+    # Additional Checks
     braintree_status = braintree_card_check(card, f"{month}/{year}", cvv)
     playstore_status = is_playstore_addable(card)
 
@@ -120,18 +134,17 @@ def process_card(update, context):
         f"📱 *Play Store Addable:* {playstore_status}\n"
         f"🔐 *Braintree Auth:* {'✅ Success' if braintree_status else '❌ Failed'}"
     )
-    update.message.reply_text(reply, parse_mode='Markdown')
+    await update.message.reply_text(reply, parse_mode='Markdown')
 
-
+# Main App
 def main():
-    updater = Updater(TELEGRAM_TOKEN, use_context=True)
-    dp = updater.dispatcher
+    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, process_card))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, process_card))
 
-    updater.start_polling()
-    updater.idle()
+    print("Bot is running...")
+    app.run_polling()
 
 if __name__ == '__main__':
     main()
